@@ -14,7 +14,7 @@ import os
 import sys
 from tempfile import TemporaryDirectory
 from dataclasses import dataclass
-from typing import NoReturn, Union, Iterator, Tuple, IO, Optional
+from typing import NoReturn, Union, Iterator, Tuple, IO, Optional, List
 from pathlib import Path
 from netaddr import IPNetwork, AddrFormatError, IPAddress
 
@@ -221,6 +221,7 @@ class Options:
     dhcp_subnet: int
     dhcp_range: Tuple[IPAddress, IPAddress]
     pixiecore_http_port: int
+    nixos_anywhere_args: List[str]
 
 
 def die(msg: str) -> NoReturn:
@@ -229,7 +230,9 @@ def die(msg: str) -> NoReturn:
 
 
 def parse_args(args: list[str]) -> Options:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+            description="Note: All arguments not listed here will be passed on to nixos-anywhere (see `nixos-anywhere --help`)."
+    )
     parser.add_argument(
         "--flake",
         help="Flake url of nixos configuration to install",
@@ -257,7 +260,7 @@ def parse_args(args: list[str]) -> Options:
         type=int,
     )
 
-    parsed = parser.parse_args(args)
+    parsed, unknown_args = parser.parse_known_args(args)
     try:
         dhcp_subnet = IPNetwork(parsed.dhcp_subnet)
     except AddrFormatError as e:
@@ -293,6 +296,7 @@ def parse_args(args: list[str]) -> Options:
         dhcp_range=(start_ip, stop_ip),
         dhcp_interface=parsed.dhcp_interface,
         pixiecore_http_port=parsed.pixiecore_http_port,
+        nixos_anywhere_args=unknown_args,
     )
 
 
@@ -312,7 +316,7 @@ def ssh_private_key() -> Iterator[SshKey]:
         yield SshKey(private_key=private_key, public_key=public_key)
 
 
-def nixos_remote(ip: str, flake: str, ssh_private_key: Path) -> None:
+def nixos_remote(ip: str, flake: str, ssh_private_key: Path, nixos_anywhere_args: List[str]) -> None:
     run(
         [
             # FIXME: path
@@ -323,8 +327,8 @@ def nixos_remote(ip: str, flake: str, ssh_private_key: Path) -> None:
             "-L",
             # do not substitute because we do not have internet and copying locally is faster.
             "--no-substitute-on-destination",
-            ip
-        ],
+            ip,
+        ] + nixos_anywhere_args,
         extra_env=dict(SSH_PRIVATE_KEY=ssh_private_key.read_text()),
         check=False
     )
@@ -397,7 +401,7 @@ def run_nixos_remote(options: Options):
                             "Will now run nixos-remote on this target. You can also try to connect to the machine by doing:"
                         )
                         print(f"  ssh -i {ssh_key.private_key} root@{event.ip_addr}")
-                        nixos_remote(event.ip_addr, options.flake, ssh_key.private_key)
+                        nixos_remote(event.ip_addr, options.flake, ssh_key.private_key, options.nixos_anywhere_args)
                         return
                 print("after")
             except Exception as e:
