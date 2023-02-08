@@ -221,6 +221,7 @@ class Options:
     dhcp_subnet: int
     dhcp_range: Tuple[IPAddress, IPAddress]
     pixiecore_http_port: int
+    pause_after_completion: bool
     nixos_anywhere_args: List[str]
 
 
@@ -259,6 +260,11 @@ def parse_args(args: list[str]) -> Options:
         default=64172,
         type=int,
     )
+    parser.add_argument(
+        "--pause-after-completion",
+        help="Whether to wait for user confimation before tearing down the network setup once the installation completed",
+        action="store_true"
+    )
 
     parsed, unknown_args = parser.parse_known_args(args)
     try:
@@ -296,6 +302,7 @@ def parse_args(args: list[str]) -> Options:
         dhcp_range=(start_ip, stop_ip),
         dhcp_interface=parsed.dhcp_interface,
         pixiecore_http_port=parsed.pixiecore_http_port,
+        pause_after_completion=parsed.pause_after_completion,
         nixos_anywhere_args=unknown_args,
     )
 
@@ -366,6 +373,9 @@ def build_pxe_image(netboot_image_flake: str) -> Path:
     )
     return Path(res.stdout.strip())
 
+def pause():
+    print("")
+    input("Press [enter] to terminate this script and tear down the network to the server.")
 
 def run_nixos_remote(options: Options):
     pxe_image_store_path = build_pxe_image(options.netboot_image_flake)
@@ -402,8 +412,13 @@ def run_nixos_remote(options: Options):
                         )
                         print(f"  ssh -i {ssh_key.private_key} root@{event.ip_addr}")
                         nixos_remote(event.ip_addr, options.flake, ssh_key.private_key, options.nixos_anywhere_args)
+                        # to avoid having to reboot physical machines all the time because networking disappears:
+                        if (options.pause_after_completion):
+                            print("You can connect to the machine by doing:")
+                            print(f"  ssh -i {ssh_key.private_key} root@{event.ip_addr}")
+                            pause()
                         return
-                print("after")
+                print("after") # i dont think this is ever printed, because the loop only exits by returning the entire function
             except Exception as e:
                 print(e)
             except KeyboardInterrupt:
